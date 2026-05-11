@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mnemonic-sdk"
+version = "0.1.0"
+description = "Persistent cognitive infrastructure for AI agents — memory, procedural learning, and cross-agent intelligence that compounds over time."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Nishant Vanawala", email = "hello@mnemonic.dev" }]
+keywords = [
+    "ai-agents", "agent-memory", "persistent-memory", "cognitive-infrastructure",
+    "procedural-learning", "llm", "openai", "anthropic", "claude", "langchain",
+    "autogen", "multi-agent", "agent-framework", "vector-search", "rag",
+    "operational-intelligence", "workflow-evolution", "cross-agent", "memory-layer"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0.0"]
+anthropic = ["anthropic>=0.25.0"]
+all = ["openai>=1.0.0", "anthropic>=0.25.0"]
+
+[project.urls]
+Homepage = "https://mnemonic.dev"
+Repository = "https://github.com/Nirvana3339/mnemonic-sdks"
+Documentation = "https://docs.mnemonic.dev"
+"Bug Tracker" = "https://github.com/Nirvana3339/mnemonic-sdks/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mnemonic"]
