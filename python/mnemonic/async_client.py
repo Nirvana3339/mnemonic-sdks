@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from mnemo.client import _raise_for
+from mnemonic.client import _raise_for
 
 
 class MnemoAsync:

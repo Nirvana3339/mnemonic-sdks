@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from mnemo.client import Mnemo
+from mnemonic.client import Mnemo
 
 
 class MnemoClaude:

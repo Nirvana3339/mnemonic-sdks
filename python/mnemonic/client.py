@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from mnemo.exceptions import AuthError, MnemoError, NotFoundError, RateLimitError
+from mnemonic.exceptions import AuthError, MnemoError, NotFoundError, RateLimitError
 
 
 def _raise_for(response: httpx.Response) -> None:

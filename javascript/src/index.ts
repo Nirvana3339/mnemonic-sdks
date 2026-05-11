@@ -6,7 +6,7 @@
  * 
  * @example
  * ```typescript
- * import { Mnemonic } from '@mnemonic-ai/sdk';
+ * import { Mnemonic } from '@mnemonicai.official/sdk-js';
  * 
  * const mnemonic = new Mnemonic({ apiKey: 'mnemo_sk_...' });
  * 

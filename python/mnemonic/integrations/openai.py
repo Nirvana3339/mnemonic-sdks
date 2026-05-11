@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mnemo.client import Mnemo
+from mnemonic.client import Mnemo
 
 
 class MnemoOpenAI:

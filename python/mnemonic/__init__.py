@@ -1,7 +1,7 @@
-"""Mnemo Python SDK — `pip install mnemo`."""
-from mnemo.client import Mnemo
-from mnemo.async_client import MnemoAsync
-from mnemo.exceptions import (
+"""Mnemo Python SDK — `pip install mnemonic-sdk`."""
+from mnemonic.client import Mnemo
+from mnemonic.async_client import MnemoAsync
+from mnemonic.exceptions import (
     MnemoError,
     AuthError,
     RateLimitError,
