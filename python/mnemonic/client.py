@@ -1,4 +1,4 @@
-"""Synchronous Mnemonic client."""
+"""Synchronous Mnemo client."""
 from __future__ import annotations
 
 import os
@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from mnemonic.exceptions import AuthError, MnemonicError, NotFoundError, RateLimitError
+from mnemo.exceptions import AuthError, MnemoError, NotFoundError, RateLimitError
 
 
 def _raise_for(response: httpx.Response) -> None:
@@ -21,22 +21,21 @@ def _raise_for(response: httpx.Response) -> None:
             detail = response.json().get("detail")
         except Exception:
             detail = response.text
-        raise MnemonicError(f"HTTP {response.status_code}: {detail}")
+        raise MnemoError(f"HTTP {response.status_code}: {detail}")
 
 
-class Mnemonic:
+class Mnemo:
     """
-    Synchronous Mnemonic client.
+    Synchronous Mnemo client.
 
     Two SDK calls bracket every agent invocation:
-      • ``recall(...)`` before the task
-      • ``capture(...)`` after the task
+      • ``recall(...)`` before
+      • ``capture(...)`` after
 
     Example:
-        >>> from mnemonic import Mnemonic
-        >>> m = Mnemonic(api_key="mnemo_sk_...")
+        >>> from mnemo import Mnemo
+        >>> m = Mnemo(api_key="mnemo_sk_...")
         >>> ctx = m.recall(agent_id="coder-7", task="fix jwt", as_prompt=True)
-        >>> # ... run your agent with ctx injected ...
         >>> m.capture(agent_id="coder-7", task="fix jwt", actions=[],
         ...           output="patched", success=True)
     """
@@ -44,17 +43,13 @@ class Mnemonic:
     def __init__(
         self,
         api_key: str | None = None,
-        base_url: str = "https://mnemonic-production.up.railway.app/api",
+        base_url: str = "https://api.mnemo.dev",
         timeout: float = 30.0,
     ) -> None:
-        self.api_key = (
-            api_key
-            or os.environ.get("MNEMONIC_API_KEY")
-            or os.environ.get("MNEMO_API_KEY")
-        )
+        self.api_key = api_key or os.environ.get("MNEMO_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "API key required. Pass api_key= or set MNEMONIC_API_KEY env var."
+                "API key required. Pass api_key= or set MNEMO_API_KEY env var."
             )
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(
@@ -62,10 +57,16 @@ class Mnemonic:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "mnemonic-python/0.2.0",
+                "User-Agent": "mnemo-python/0.1.0",
             },
             timeout=timeout,
         )
+        # Auto-install Claude Code hook on first use — silent, never crashes
+        try:
+            from mnemo.setup import auto_setup
+            auto_setup(silent=True)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ recall
     def recall(
@@ -73,43 +74,24 @@ class Mnemonic:
         agent_id: str,
         task: str,
         limit: int = 5,
-        context: dict[str, Any] | None = None,
+        min_confidence: float = 0.6,
         as_prompt: bool = False,
     ) -> dict | str:
-        """Retrieve relevant lessons and procedures before running an agent task.
+        """Retrieve relevant lessons/procedures before running an agent task.
 
-        Args:
-            agent_id: Your agent's identifier.
-            task: Description of the task the agent is about to perform.
-            limit: Max number of lessons to retrieve (default 5).
-            context: Optional dict of environment metadata to improve routing
-                     e.g. {"framework": "react", "language": "typescript"}.
-            as_prompt: If True, returns a formatted string ready to inject into
-                       the agent's system prompt instead of a structured dict.
-
-        Returns:
-            RecallResponse dict (or formatted string if as_prompt=True).
-
-        Example:
-            >>> lessons = m.recall(
-            ...     agent_id="frontend-agent",
-            ...     task="fix React context rerender storm",
-            ...     context={"framework": "react", "runtime": "production"},
-            ... )
-            >>> for lesson in lessons["lessons"]:
-            ...     print(lesson["problem_signature"], lesson["root_cause"])
+        If ``as_prompt=True`` returns a formatted string ready to inject into
+        the agent's system prompt; otherwise returns a structured dict.
         """
-        payload: dict[str, Any] = {
-            "agent_id": agent_id,
-            "task": task,
-            "limit": limit,
-        }
-        if context:
-            payload["context"] = context
-        if as_prompt:
-            payload["as_prompt"] = True
-
-        r = self._client.post("/v1/recall", json=payload)
+        r = self._client.post(
+            "/v1/recall",
+            json={
+                "agent_id": agent_id,
+                "task": task,
+                "limit": limit,
+                "min_confidence": min_confidence,
+                "as_prompt": as_prompt,
+            },
+        )
         _raise_for(r)
         data = r.json()
         if as_prompt:
@@ -121,49 +103,72 @@ class Mnemonic:
         self,
         agent_id: str,
         task: str,
-        actions: list[dict[str, Any]],
-        output: str,
-        success: bool,
+        actions: list[dict[str, Any]] | None = None,
+        output: str | None = None,
+        success: bool | None = None,       # Omit → inferred from signals
         time_taken: int | None = None,
         retries: int = 0,
         metadata: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+        conversation: list[dict[str, str]] | None = None,  # [{"role": "user", "content": "..."}]
+        code_diffs: list[str] | None = None,
+        test_output: str | None = None,
     ) -> dict:
-        """Capture an agent execution so Mnemonic can learn from it.
+        """Capture an agent execution. Returns immediately; reflection runs async.
 
-        Reflection runs asynchronously on the server — this call returns
-        immediately.
+        success is optional — if omitted, outcome is inferred from conversation,
+        code_diffs, test_output, and session patterns.
 
-        Args:
-            agent_id: Your agent's identifier.
-            task: The task that was performed.
-            actions: List of actions the agent took, e.g.
-                     [{"type": "tool_call", "target": "bash", "result": "ok"}].
-            output: Final output or summary from the agent.
-            success: Whether the task succeeded.
-            time_taken: Duration in milliseconds (optional).
-            retries: Number of retries needed (default 0).
-            metadata: Any additional context to store.
+        Example (explicit):
+            m.capture(agent_id="coder", task="fix auth bug",
+                      output="patched jwt.py", success=True)
 
-        Returns:
-            {"event_id": "...", "status": "captured", "reflection_queued": True}
+        Example (implicit — let signals decide):
+            m.capture(agent_id="coder", task="debug dashboard",
+                      conversation=messages, code_diffs=diffs)
         """
         r = self._client.post(
             "/v1/events",
             json={
                 "agent_id": agent_id,
                 "task": task,
-                "actions": actions,
+                "actions": actions or [],
                 "output": output,
                 "success": success,
                 "time_taken": time_taken,
                 "retries": retries,
                 "metadata": metadata or {},
+                "context": context or {},
+                "conversation": conversation or [],
+                "code_diffs": code_diffs or [],
+                "test_output": test_output,
             },
         )
         _raise_for(r)
         return r.json()
 
-    # ---------------------------------------------------------- agent helpers
+    def auto_capture(
+        self,
+        agent_id: str,
+        task: str,
+        context: dict[str, Any] | None = None,
+    ) -> "_AutoCaptureSession":
+        """Context manager that automatically captures the session on exit.
+
+        Usage:
+            with m.auto_capture(agent_id="coder", task="fix auth bug",
+                                 context={"framework": "react"}) as session:
+                # run your agent here
+                result = my_agent.run(task)
+                session.add_message("user", user_input)
+                session.add_message("assistant", result)
+                session.set_output(result)
+                session.add_diff(patch)          # optional
+                session.set_test_output(output)  # optional
+        """
+        return _AutoCaptureSession(self, agent_id, task, context or {})
+
+    # ---------------------------------------------------------- helper methods
     def create_agent(
         self,
         external_id: str,
@@ -171,7 +176,6 @@ class Mnemonic:
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict:
-        """Create or register an agent."""
         r = self._client.post(
             "/v1/agents",
             json={
@@ -210,7 +214,6 @@ class Mnemonic:
         _raise_for(r)
         return r.json()
 
-    # ---------------------------------------------------------- feedback
     def submit_feedback(
         self,
         rating: str,
@@ -230,7 +233,7 @@ class Mnemonic:
         _raise_for(r)
         return r.json()
 
-    # ---------------------------------------------------------- analytics
+    # -------------------------------------------------- network effects (v2)
     def report_lesson_effectiveness(
         self,
         lesson_id: str,
@@ -239,7 +242,36 @@ class Mnemonic:
         outcome: str,  # 'success' | 'failure' | 'partial'
         improvement_metrics: dict[str, Any] | None = None,
     ) -> dict:
-        """Report how using a lesson affected task outcome."""
+        """Report how using a lesson affected task outcome.
+        
+        Enables network effect tracking:
+        - Which lessons are most helpful
+        - Success rates across different contexts
+        - Attribution (which agents create valuable lessons)
+        
+        Args:
+            lesson_id: ID of the lesson that was used
+            agent_id: Agent that used the lesson
+            task: The task that was performed
+            outcome: 'success', 'failure', or 'partial'
+            improvement_metrics: Optional metrics like:
+                {
+                    "time_saved_ms": 5000,
+                    "retries_reduced": 2,
+                    "errors_avoided": 1
+                }
+        
+        Example:
+            >>> lessons = m.recall(agent_id="agent-1", task="fix redis timeout")
+            >>> # Agent uses lesson to fix issue
+            >>> m.report_lesson_effectiveness(
+            ...     lesson_id=lessons['lessons'][0]['id'],
+            ...     agent_id="agent-1",
+            ...     task="fix redis timeout",
+            ...     outcome="success",
+            ...     improvement_metrics={"time_saved_ms": 3600000, "retries_reduced": 3}
+            ... )
+        """
         r = self._client.post(
             "/v1/analytics/lesson-effectiveness",
             json={
@@ -254,101 +286,58 @@ class Mnemonic:
         return r.json()
 
     def get_lesson_analytics(self, lesson_id: str) -> dict:
+        """Get detailed analytics for a specific lesson.
+        
+        Returns:
+            {
+                "lesson_id": "...",
+                "content": "...",
+                "quality_score": 0.85,
+                "usage_count": 42,
+                "success_count": 38,
+                "failure_count": 4,
+                "success_rate": 0.90,
+                "created_by_tenant_id": "...",
+                "created_by_agent_id": "...",
+                "reinforcement_count": 5,
+                "contradiction_count": 0
+            }
+        
+        Example:
+            >>> analytics = m.get_lesson_analytics("lesson-uuid")
+            >>> print(f"Quality: {analytics['quality_score']:.2f}")
+            >>> print(f"Success rate: {analytics['success_rate']:.0%}")
+        """
         r = self._client.get(f"/v1/analytics/lesson/{lesson_id}")
         _raise_for(r)
         return r.json()
 
     def get_network_effects_stats(self) -> dict:
+        """Get global network effects statistics.
+        
+        Returns:
+            {
+                "total_lessons": 10523,
+                "public_lessons": 8421,
+                "private_lessons": 2102,
+                "total_usage_events": 52341,
+                "avg_quality_score": 0.73,
+                "top_lessons": [...],
+                "cross_tenant_learning_events": 15234
+            }
+        
+        Shows how the global knowledge network is performing:
+        - Total lessons in the system
+        - Public vs private distribution
+        - Top performing lessons
+        - Cross-tenant learning metrics (network effects in action!)
+        
+        Example:
+            >>> stats = m.get_network_effects_stats()
+            >>> print(f"Network effects: {stats['cross_tenant_learning_events']} cross-tenant learnings!")
+            >>> print(f"Top lesson: {stats['top_lessons'][0]['content']}")
+        """
         r = self._client.get("/v1/analytics/network-effects")
-        _raise_for(r)
-        return r.json()
-
-    # ---------------------------------------------------------- recall feedback
-    def recall_feedback(
-        self,
-        agent_id: str,
-        task: str,
-        lessons_recalled: int,
-        resolution_success: bool,
-        lessons_used: int = 0,
-        avg_applicability: float = 0.5,
-        context: dict[str, Any] | None = None,
-        session_id: str | None = None,
-        resolution_notes: str = "",
-        hallucination_detected: bool = False,
-        recalled_lesson_ids: list[str] | None = None,
-    ) -> dict:
-        """Report the outcome of a recall session to train the Bayesian engine.
-
-        Call this after your agent finishes a task to feed real signal back into
-        the confidence system. Without this call the engine has no ground-truth
-        signal — lessons won't improve or decay based on actual usefulness.
-
-        Args:
-            agent_id: The agent that performed the recall.
-            task: The task that was performed (same string passed to recall()).
-            lessons_recalled: How many lessons came back from recall().
-            resolution_success: Did the task succeed?
-            lessons_used: How many recalled lessons were actually applied.
-            avg_applicability: Subjective 0-1 score of how applicable the lessons were.
-            context: Same context dict passed to recall() (used for gap detection).
-            session_id: Optional identifier to correlate this with a recall call.
-            resolution_notes: Optional free-text notes.
-            hallucination_detected: True if a recalled lesson caused incorrect output.
-            recalled_lesson_ids: List of lesson IDs that were used (from RecallResponse).
-
-        Returns:
-            {"feedback_id": "...", "knowledge_gap_detected": bool, ...}
-        """
-        r = self._client.post(
-            "/v1/analytics/recall-feedback",
-            json={
-                "agent_id": agent_id,
-                "task": task,
-                "lessons_recalled": lessons_recalled,
-                "lessons_used": lessons_used,
-                "avg_applicability": avg_applicability,
-                "resolution_success": resolution_success,
-                "context": context or {},
-                "session_id": session_id,
-                "resolution_notes": resolution_notes,
-                "hallucination_detected": hallucination_detected,
-                "recalled_lesson_ids": recalled_lesson_ids or [],
-            },
-        )
-        _raise_for(r)
-        return r.json()
-
-    def record_outcome(
-        self,
-        lesson_id: str,
-        success: bool,
-        context: dict[str, Any] | None = None,
-        notes: str = "",
-    ) -> dict:
-        """Record a Bayesian outcome for a specific lesson.
-
-        This updates the lesson's confidence using the Bayesian formula
-        (successes + 1) / (total_uses + 2). Call this when you know a specific
-        lesson led to success or failure on a task.
-
-        Args:
-            lesson_id: ID of the lesson from RecallResponse.
-            success: Whether using this lesson led to task success.
-            context: Context in which the lesson was used.
-            notes: Optional notes about the outcome.
-
-        Returns:
-            Updated confidence info dict.
-        """
-        r = self._client.post(
-            f"/v1/lessons/{lesson_id}/outcome",
-            json={
-                "success": success,
-                "context": context or {},
-                "notes": notes,
-            },
-        )
         _raise_for(r)
         return r.json()
 
@@ -356,8 +345,62 @@ class Mnemonic:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "Mnemonic":
+    def __enter__(self) -> "Mnemo":
         return self
 
     def __exit__(self, *_args) -> None:
         self.close()
+
+
+class _AutoCaptureSession:
+    """Collects session data and fires capture() automatically on __exit__."""
+
+    def __init__(self, client: Mnemo, agent_id: str, task: str, context: dict):
+        self._client = client
+        self._agent_id = agent_id
+        self._task = task
+        self._context = context
+        self._conversation: list[dict[str, str]] = []
+        self._output: str | None = None
+        self._diffs: list[str] = []
+        self._test_output: str | None = None
+        self._start_time = None
+
+    def __enter__(self) -> "_AutoCaptureSession":
+        import time
+        self._start_time = time.time()
+        return self
+
+    def add_message(self, role: str, content: str) -> None:
+        """Add a conversation message. role = 'user' | 'assistant' | 'system' | 'tool'"""
+        self._conversation.append({"role": role, "content": content})
+
+    def set_output(self, output: str) -> None:
+        """Set the agent's final output text."""
+        self._output = output
+
+    def add_diff(self, diff: str) -> None:
+        """Add a code diff/patch the agent produced."""
+        self._diffs.append(diff)
+
+    def set_test_output(self, output: str) -> None:
+        """Set test/build output for outcome inference."""
+        self._test_output = output
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        import time
+        time_taken = int((time.time() - self._start_time) * 1000) if self._start_time else None
+        try:
+            self._client.capture(
+                agent_id=self._agent_id,
+                task=self._task,
+                output=self._output,
+                success=None,           # Always inferred — never explicit from context manager
+                time_taken=time_taken,
+                context=self._context,
+                conversation=self._conversation,
+                code_diffs=self._diffs,
+                test_output=self._test_output,
+            )
+        except Exception:
+            pass  # Never crash the caller's code due to capture failure
