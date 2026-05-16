@@ -1,14 +1,29 @@
-class MnemoError(Exception):
-    """Base exception."""
+"""Mnemonic SDK exceptions."""
 
 
-class AuthError(MnemoError):
-    """401 — invalid or missing API key."""
+class MnemonicError(Exception):
+    """Base exception for all Mnemonic SDK errors."""
+    pass
+
+# Backwards compat alias
+MnemoError = MnemonicError
 
 
-class RateLimitError(MnemoError):
-    """429 — too many requests."""
+class AuthError(MnemonicError):
+    """Invalid or missing API key."""
+    pass
 
 
-class NotFoundError(MnemoError):
-    """404 — referenced resource missing."""
+class NotFoundError(MnemonicError):
+    """Resource not found."""
+    pass
+
+
+class RateLimitError(MnemonicError):
+    """Rate limit exceeded."""
+    pass
+
+
+class ValidationError(MnemonicError):
+    """Request validation failed."""
+    pass

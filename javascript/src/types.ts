@@ -19,7 +19,7 @@ export interface RecallRequest {
   agentId: string;
   task: string;
   limit?: number;
-  minConfidence?: number;
+  context?: Record<string, any>;
   asPrompt?: boolean;
 }
 
@@ -28,12 +28,23 @@ export interface LessonHit {
   content: string;
   lessonType?: string;
   confidence: number;
-  similarity: number;
+  similarity: float;
+  contextSimilarity: number;
+  finalScore: number;
   qualityScore?: number;
   usageCount?: number;
   source?: 'own' | 'team' | 'global';
-  createdByTenantId?: string;
-  createdByAgentId?: string;
+  isStale: boolean;
+  isDeprecated: boolean;
+  // Structured fields
+  domain?: string;
+  subdomain?: string;
+  problemType?: string;
+  problemSignature?: string;
+  rootCause?: string;
+  solutionSteps?: string[];
+  validationSteps?: string[];
+  failureSignals?: string[];
 }
 
 export interface ProcedureHit {
@@ -51,6 +62,7 @@ export interface RecallResponse {
   lessons: LessonHit[];
   procedures: ProcedureHit[];
   contextPrompt?: string;
+  warnings: string[];
 }
 
 export interface CaptureRequest {
@@ -102,6 +114,9 @@ export interface Lesson {
   content: string;
   lessonType?: string;
   confidence: number;
+  problemSignature?: string;
+  rootCause?: string;
+  solutionSteps?: string[];
   [key: string]: any;
 }
 
@@ -122,8 +137,6 @@ export interface FeedbackRequest {
   procedureId?: string;
   comment?: string;
 }
-
-// ============= v2 Network Effects Types =============
 
 export type LessonOutcome = 'success' | 'failure' | 'partial';
 
@@ -171,9 +184,4 @@ export interface NetworkEffectsStats {
   avgQualityScore: number;
   topLessons: LessonAnalytics[];
   crossTenantLearningEvents: number;
-}
-
-export interface MnemonicError extends Error {
-  statusCode?: number;
-  response?: any;
 }

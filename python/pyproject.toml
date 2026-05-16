@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mnemonic-sdk"
-version = "0.1.1"
+version = "0.2.0"
 description = "Persistent cognitive infrastructure for AI agents — memory, procedural learning, and cross-agent intelligence that compounds over time."
 readme = "README.md"
 license = { text = "MIT" }

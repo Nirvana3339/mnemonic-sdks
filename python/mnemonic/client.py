@@ -1,4 +1,4 @@
-"""Synchronous Mnemo client."""
+"""Synchronous Mnemonic client."""
 from __future__ import annotations
 
 import os
@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from mnemonic.exceptions import AuthError, MnemoError, NotFoundError, RateLimitError
+from mnemonic.exceptions import AuthError, MnemonicError, NotFoundError, RateLimitError
 
 
 def _raise_for(response: httpx.Response) -> None:
@@ -21,21 +21,22 @@ def _raise_for(response: httpx.Response) -> None:
             detail = response.json().get("detail")
         except Exception:
             detail = response.text
-        raise MnemoError(f"HTTP {response.status_code}: {detail}")
+        raise MnemonicError(f"HTTP {response.status_code}: {detail}")
 
 
-class Mnemo:
+class Mnemonic:
     """
-    Synchronous Mnemo client.
+    Synchronous Mnemonic client.
 
     Two SDK calls bracket every agent invocation:
-      • ``recall(...)`` before
-      • ``capture(...)`` after
+      • ``recall(...)`` before the task
+      • ``capture(...)`` after the task
 
     Example:
-        >>> from mnemo import Mnemo
-        >>> m = Mnemo(api_key="mnemo_sk_...")
+        >>> from mnemonic import Mnemonic
+        >>> m = Mnemonic(api_key="mnemo_sk_...")
         >>> ctx = m.recall(agent_id="coder-7", task="fix jwt", as_prompt=True)
+        >>> # ... run your agent with ctx injected ...
         >>> m.capture(agent_id="coder-7", task="fix jwt", actions=[],
         ...           output="patched", success=True)
     """
@@ -43,13 +44,17 @@ class Mnemo:
     def __init__(
         self,
         api_key: str | None = None,
-        base_url: str = "https://api.mnemo.dev",
+        base_url: str = "https://mnemonic-production.up.railway.app/api",
         timeout: float = 30.0,
     ) -> None:
-        self.api_key = api_key or os.environ.get("MNEMO_API_KEY")
+        self.api_key = (
+            api_key
+            or os.environ.get("MNEMONIC_API_KEY")
+            or os.environ.get("MNEMO_API_KEY")
+        )
         if not self.api_key:
             raise ValueError(
-                "API key required. Pass api_key= or set MNEMO_API_KEY env var."
+                "API key required. Pass api_key= or set MNEMONIC_API_KEY env var."
             )
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(
@@ -57,7 +62,7 @@ class Mnemo:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "mnemo-python/0.1.0",
+                "User-Agent": "mnemonic-python/0.2.0",
             },
             timeout=timeout,
         )
@@ -68,24 +73,43 @@ class Mnemo:
         agent_id: str,
         task: str,
         limit: int = 5,
-        min_confidence: float = 0.6,
+        context: dict[str, Any] | None = None,
         as_prompt: bool = False,
     ) -> dict | str:
-        """Retrieve relevant lessons/procedures before running an agent task.
+        """Retrieve relevant lessons and procedures before running an agent task.
 
-        If ``as_prompt=True`` returns a formatted string ready to inject into
-        the agent's system prompt; otherwise returns a structured dict.
+        Args:
+            agent_id: Your agent's identifier.
+            task: Description of the task the agent is about to perform.
+            limit: Max number of lessons to retrieve (default 5).
+            context: Optional dict of environment metadata to improve routing
+                     e.g. {"framework": "react", "language": "typescript"}.
+            as_prompt: If True, returns a formatted string ready to inject into
+                       the agent's system prompt instead of a structured dict.
+
+        Returns:
+            RecallResponse dict (or formatted string if as_prompt=True).
+
+        Example:
+            >>> lessons = m.recall(
+            ...     agent_id="frontend-agent",
+            ...     task="fix React context rerender storm",
+            ...     context={"framework": "react", "runtime": "production"},
+            ... )
+            >>> for lesson in lessons["lessons"]:
+            ...     print(lesson["problem_signature"], lesson["root_cause"])
         """
-        r = self._client.post(
-            "/v1/recall",
-            json={
-                "agent_id": agent_id,
-                "task": task,
-                "limit": limit,
-                "min_confidence": min_confidence,
-                "as_prompt": as_prompt,
-            },
-        )
+        payload: dict[str, Any] = {
+            "agent_id": agent_id,
+            "task": task,
+            "limit": limit,
+        }
+        if context:
+            payload["context"] = context
+        if as_prompt:
+            payload["as_prompt"] = True
+
+        r = self._client.post("/v1/recall", json=payload)
         _raise_for(r)
         data = r.json()
         if as_prompt:
@@ -104,8 +128,25 @@ class Mnemo:
         retries: int = 0,
         metadata: dict[str, Any] | None = None,
     ) -> dict:
-        """Capture an agent execution. Returns immediately; reflection runs
-        asynchronously on the server."""
+        """Capture an agent execution so Mnemonic can learn from it.
+
+        Reflection runs asynchronously on the server — this call returns
+        immediately.
+
+        Args:
+            agent_id: Your agent's identifier.
+            task: The task that was performed.
+            actions: List of actions the agent took, e.g.
+                     [{"type": "tool_call", "target": "bash", "result": "ok"}].
+            output: Final output or summary from the agent.
+            success: Whether the task succeeded.
+            time_taken: Duration in milliseconds (optional).
+            retries: Number of retries needed (default 0).
+            metadata: Any additional context to store.
+
+        Returns:
+            {"event_id": "...", "status": "captured", "reflection_queued": True}
+        """
         r = self._client.post(
             "/v1/events",
             json={
@@ -122,7 +163,7 @@ class Mnemo:
         _raise_for(r)
         return r.json()
 
-    # ---------------------------------------------------------- helper methods
+    # ---------------------------------------------------------- agent helpers
     def create_agent(
         self,
         external_id: str,
@@ -130,6 +171,7 @@ class Mnemo:
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict:
+        """Create or register an agent."""
         r = self._client.post(
             "/v1/agents",
             json={
@@ -168,6 +210,7 @@ class Mnemo:
         _raise_for(r)
         return r.json()
 
+    # ---------------------------------------------------------- feedback
     def submit_feedback(
         self,
         rating: str,
@@ -187,7 +230,7 @@ class Mnemo:
         _raise_for(r)
         return r.json()
 
-    # -------------------------------------------------- network effects (v2)
+    # ---------------------------------------------------------- analytics
     def report_lesson_effectiveness(
         self,
         lesson_id: str,
@@ -196,36 +239,7 @@ class Mnemo:
         outcome: str,  # 'success' | 'failure' | 'partial'
         improvement_metrics: dict[str, Any] | None = None,
     ) -> dict:
-        """Report how using a lesson affected task outcome.
-        
-        Enables network effect tracking:
-        - Which lessons are most helpful
-        - Success rates across different contexts
-        - Attribution (which agents create valuable lessons)
-        
-        Args:
-            lesson_id: ID of the lesson that was used
-            agent_id: Agent that used the lesson
-            task: The task that was performed
-            outcome: 'success', 'failure', or 'partial'
-            improvement_metrics: Optional metrics like:
-                {
-                    "time_saved_ms": 5000,
-                    "retries_reduced": 2,
-                    "errors_avoided": 1
-                }
-        
-        Example:
-            >>> lessons = m.recall(agent_id="agent-1", task="fix redis timeout")
-            >>> # Agent uses lesson to fix issue
-            >>> m.report_lesson_effectiveness(
-            ...     lesson_id=lessons['lessons'][0]['id'],
-            ...     agent_id="agent-1",
-            ...     task="fix redis timeout",
-            ...     outcome="success",
-            ...     improvement_metrics={"time_saved_ms": 3600000, "retries_reduced": 3}
-            ... )
-        """
+        """Report how using a lesson affected task outcome."""
         r = self._client.post(
             "/v1/analytics/lesson-effectiveness",
             json={
@@ -240,57 +254,11 @@ class Mnemo:
         return r.json()
 
     def get_lesson_analytics(self, lesson_id: str) -> dict:
-        """Get detailed analytics for a specific lesson.
-        
-        Returns:
-            {
-                "lesson_id": "...",
-                "content": "...",
-                "quality_score": 0.85,
-                "usage_count": 42,
-                "success_count": 38,
-                "failure_count": 4,
-                "success_rate": 0.90,
-                "created_by_tenant_id": "...",
-                "created_by_agent_id": "...",
-                "reinforcement_count": 5,
-                "contradiction_count": 0
-            }
-        
-        Example:
-            >>> analytics = m.get_lesson_analytics("lesson-uuid")
-            >>> print(f"Quality: {analytics['quality_score']:.2f}")
-            >>> print(f"Success rate: {analytics['success_rate']:.0%}")
-        """
         r = self._client.get(f"/v1/analytics/lesson/{lesson_id}")
         _raise_for(r)
         return r.json()
 
     def get_network_effects_stats(self) -> dict:
-        """Get global network effects statistics.
-        
-        Returns:
-            {
-                "total_lessons": 10523,
-                "public_lessons": 8421,
-                "private_lessons": 2102,
-                "total_usage_events": 52341,
-                "avg_quality_score": 0.73,
-                "top_lessons": [...],
-                "cross_tenant_learning_events": 15234
-            }
-        
-        Shows how the global knowledge network is performing:
-        - Total lessons in the system
-        - Public vs private distribution
-        - Top performing lessons
-        - Cross-tenant learning metrics (network effects in action!)
-        
-        Example:
-            >>> stats = m.get_network_effects_stats()
-            >>> print(f"Network effects: {stats['cross_tenant_learning_events']} cross-tenant learnings!")
-            >>> print(f"Top lesson: {stats['top_lessons'][0]['content']}")
-        """
         r = self._client.get("/v1/analytics/network-effects")
         _raise_for(r)
         return r.json()
@@ -299,7 +267,7 @@ class Mnemo:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "Mnemo":
+    def __enter__(self) -> "Mnemonic":
         return self
 
     def __exit__(self, *_args) -> None:

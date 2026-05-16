@@ -1,19 +1,23 @@
-"""Mnemo Python SDK — `pip install mnemonic-sdk`."""
-from mnemonic.client import Mnemo
-from mnemonic.async_client import MnemoAsync
-from mnemonic.exceptions import (
-    MnemoError,
-    AuthError,
-    RateLimitError,
-    NotFoundError,
-)
+"""Mnemonic SDK — Persistent cognitive infrastructure for AI agents."""
 
+from mnemonic.client import Mnemonic
+from mnemonic.async_client import AsyncMnemonic
+from mnemonic.exceptions import AuthError, MnemonicError, MnemoError, NotFoundError, RateLimitError, ValidationError
+from mnemonic.models import Action, CaptureResponse, LessonHit, ProcedureHit, RecallResponse
+
+__version__ = "0.2.0"
 __all__ = [
-    "Mnemo",
-    "MnemoAsync",
+    "Mnemonic",
+    "AsyncMnemonic",
+    "MnemonicError",
     "MnemoError",
     "AuthError",
-    "RateLimitError",
     "NotFoundError",
+    "RateLimitError",
+    "ValidationError",
+    "Action",
+    "CaptureResponse",
+    "LessonHit",
+    "ProcedureHit",
+    "RecallResponse",
 ]
-__version__ = "0.1.0"
