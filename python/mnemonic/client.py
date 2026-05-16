@@ -263,6 +263,95 @@ class Mnemonic:
         _raise_for(r)
         return r.json()
 
+    # ---------------------------------------------------------- recall feedback
+    def recall_feedback(
+        self,
+        agent_id: str,
+        task: str,
+        lessons_recalled: int,
+        resolution_success: bool,
+        lessons_used: int = 0,
+        avg_applicability: float = 0.5,
+        context: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        resolution_notes: str = "",
+        hallucination_detected: bool = False,
+        recalled_lesson_ids: list[str] | None = None,
+    ) -> dict:
+        """Report the outcome of a recall session to train the Bayesian engine.
+
+        Call this after your agent finishes a task to feed real signal back into
+        the confidence system. Without this call the engine has no ground-truth
+        signal — lessons won't improve or decay based on actual usefulness.
+
+        Args:
+            agent_id: The agent that performed the recall.
+            task: The task that was performed (same string passed to recall()).
+            lessons_recalled: How many lessons came back from recall().
+            resolution_success: Did the task succeed?
+            lessons_used: How many recalled lessons were actually applied.
+            avg_applicability: Subjective 0-1 score of how applicable the lessons were.
+            context: Same context dict passed to recall() (used for gap detection).
+            session_id: Optional identifier to correlate this with a recall call.
+            resolution_notes: Optional free-text notes.
+            hallucination_detected: True if a recalled lesson caused incorrect output.
+            recalled_lesson_ids: List of lesson IDs that were used (from RecallResponse).
+
+        Returns:
+            {"feedback_id": "...", "knowledge_gap_detected": bool, ...}
+        """
+        r = self._client.post(
+            "/v1/analytics/recall-feedback",
+            json={
+                "agent_id": agent_id,
+                "task": task,
+                "lessons_recalled": lessons_recalled,
+                "lessons_used": lessons_used,
+                "avg_applicability": avg_applicability,
+                "resolution_success": resolution_success,
+                "context": context or {},
+                "session_id": session_id,
+                "resolution_notes": resolution_notes,
+                "hallucination_detected": hallucination_detected,
+                "recalled_lesson_ids": recalled_lesson_ids or [],
+            },
+        )
+        _raise_for(r)
+        return r.json()
+
+    def record_outcome(
+        self,
+        lesson_id: str,
+        success: bool,
+        context: dict[str, Any] | None = None,
+        notes: str = "",
+    ) -> dict:
+        """Record a Bayesian outcome for a specific lesson.
+
+        This updates the lesson's confidence using the Bayesian formula
+        (successes + 1) / (total_uses + 2). Call this when you know a specific
+        lesson led to success or failure on a task.
+
+        Args:
+            lesson_id: ID of the lesson from RecallResponse.
+            success: Whether using this lesson led to task success.
+            context: Context in which the lesson was used.
+            notes: Optional notes about the outcome.
+
+        Returns:
+            Updated confidence info dict.
+        """
+        r = self._client.post(
+            f"/v1/lessons/{lesson_id}/outcome",
+            json={
+                "success": success,
+                "context": context or {},
+                "notes": notes,
+            },
+        )
+        _raise_for(r)
+        return r.json()
+
     # ---------------------------------------------------------------- cleanup
     def close(self) -> None:
         self._client.close()
