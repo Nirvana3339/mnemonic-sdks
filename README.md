@@ -85,6 +85,8 @@ npm install @mnemonicai.official/sdk-js
 
 ## Quick Start
 
+API key - https://mnemonic.nishantvanawala6118.workers.dev/
+
 ### Python
 
 ```python
